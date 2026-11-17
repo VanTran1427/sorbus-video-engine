@@ -1,0 +1,29 @@
+name: Render 30s Video
+on:
+  repository_dispatch:
+    types: [render_video]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Python & FFmpeg
+        run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+          pip install edge-tts requests
+      - name: Render Video 30s
+        env:
+          P1: ${{ github.event.client_payload.p1 }}
+          P2: ${{ github.event.client_payload.p2 }}
+          P3: ${{ github.event.client_payload.p3 }}
+          P4: ${{ github.event.client_payload.p4 }}
+          P5: ${{ github.event.client_payload.p5 }}
+          VOICE_TEXT: ${{ github.event.client_payload.voice_text }}
+        run: python render.py
+      - name: Send MP4 back to Make Webhook
+        run: |
+          curl -X POST "${{ github.event.client_payload.webhook_url }}" \
+            -F "content_id=${{ github.event.client_payload.content_id }}" \
+            -F "row_number=${{ github.event.client_payload.row_number }}" \
+            -F "file=@final_30s.mp4"

@@ -25,11 +25,20 @@ jobs:
           P5: ${{ github.event.client_payload.p5 }}
           VOICE_TEXT: ${{ github.event.client_payload.voice_text }}
         run: python render.py
+      - name: Luu file MP4 ngay tren GitHub (Xem truc tiep)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sorbus-video-30s
+          path: final_30s.mp4
 
-      - name: Send MP4 back to Make Webhook
-        if: ${{ github.event.client_payload.webhook_url != null }}
+      - name: Nen chuan < 4.5MB & Gui ve Make Webhook
+        if: ${{ github.event.client_payload.webhook_url != null && github.event.client_payload.webhook_url != '' }}
         run: |
-          curl -X POST "${{ github.event.client_payload.webhook_url }}" \
+          ffmpeg -y -i final_30s.mp4 -c:v libx264 -crf 28 -maxrate 900k -bufsize 1800k -c:a aac -b:a 128k send_make.mp4
+          ls -lh final_30s.mp4 send_make.mp4
+          curl --fail -i -X POST "${{ github.event.client_payload.webhook_url }}" \
             -F "content_id=${{ github.event.client_payload.content_id }}" \
             -F "row_number=${{ github.event.client_payload.row_number }}" \
-            -F "file=@final_30s.mp4"
+            -F "file=@send_make.mp4;filename=final_30s.mp4"
+
+   

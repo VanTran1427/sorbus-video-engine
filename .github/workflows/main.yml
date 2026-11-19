@@ -1,6 +1,11 @@
-name: Render 30s Video
+name: Sorbus Dung Video Do Hoa (1080x1920)
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "Che do chay: preview (xuat Keyframe tinh) hoac render (xuat MP4)"
+        required: true
+        default: "preview"
   repository_dispatch:
     types: [render_video]
 
@@ -10,35 +15,48 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install FFmpeg & Python packages
+      - name: Install FFmpeg, Fonts & Playwright Chromium
         run: |
-          sudo apt-get update && sudo apt-get install -y ffmpeg
-          pip install requests edge-tts
+          sudo apt-get update && sudo apt-get install -y ffmpeg fonts-noto-core
+          pip install requests pillow playwright
+          playwright install chromium
 
-      - name: Run Subagents & Render Video 30s
+      - name: Run HTML-to-Video Engine & Visual/Video QA
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          P1: ${{ github.event.client_payload.p1 }}
-          P2: ${{ github.event.client_payload.p2 }}
-          P3: ${{ github.event.client_payload.p3 }}
-          P4: ${{ github.event.client_payload.p4 }}
-          P5: ${{ github.event.client_payload.p5 }}
-          VOICE_TEXT: ${{ github.event.client_payload.voice_text }}
+          MODE: ${{ github.event.client_payload.mode || github.event.inputs.mode || 'render' }}
+          CONTENT_ID: ${{ github.event.client_payload.content_id || 'TEST-LOCAL' }}
+          APPROVAL_STATUS: ${{ github.event.client_payload.approval_status || '' }}
+          PALETTE: ${{ github.event.client_payload.palette || 'natural' }}
+          PACKSHOT_URL: ${{ github.event.client_payload.packshot_url || '' }}
+          SOURCE_CITATION: ${{ github.event.client_payload.source_citation || '' }}
+          DISCLAIMER_TEXT: ${{ github.event.client_payload.disclaimer_text || '' }}
+          VOICE_AUDIO_URL: ${{ github.event.client_payload.voice_audio_url || '' }}
+          VOICE_TEXT: ${{ github.event.client_payload.voice_text || '' }}
+          SCENES_JSON: ${{ github.event.client_payload.scenes_json || '' }}
+          P1: ${{ github.event.client_payload.p1 || '' }}
+          P2: ${{ github.event.client_payload.p2 || '' }}
+          P3: ${{ github.event.client_payload.p3 || '' }}
+          P4: ${{ github.event.client_payload.p4 || '' }}
+          P5: ${{ github.event.client_payload.p5 || '' }}
         run: python render.py
-      - name: Luu file MP4 ngay tren GitHub (Xem truc tiep)
+
+      - name: Upload Keyframes, MP4 & QA Receipt to Artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sorbus-video-30s
-          path: final_30s.mp4
+          name: sorbus-${{ github.event.client_payload.content_id || 'output' }}
+          path: |
+            keyframes/
+            Video_cho_duyet/
+            QA_Receipt.md
 
-      - name: Nen chuan < 4.5MB & Gui ve Make Webhook
-        if: ${{ github.event.client_payload.webhook_url != null && github.event.client_payload.webhook_url != '' }}
+      - name: Send 1080x1920 MP4 back to Make Webhook (Only when Render Approved)
+        if: ${{ success() && github.event.client_payload.webhook_url != null && github.event.client_payload.webhook_url != '' && (github.event.client_payload.mode != 'preview') }}
         run: |
-          ffmpeg -y -i final_30s.mp4 -c:v libx264 -crf 28 -maxrate 900k -bufsize 1800k -c:a aac -b:a 128k send_make.mp4
+          ffmpeg -y -i final_30s.mp4 -c:v libx264 -profile:v high -pix_fmt yuv420p -crf 23 -maxrate 1150k -bufsize 2300k -c:a aac -b:a 128k -movflags +faststart send_make.mp4
           ls -lh final_30s.mp4 send_make.mp4
           curl --fail -i -X POST "${{ github.event.client_payload.webhook_url }}" \
             -F "content_id=${{ github.event.client_payload.content_id }}" \
             -F "row_number=${{ github.event.client_payload.row_number }}" \
-            -F "file=@send_make.mp4;filename=final_30s.mp4"
-
-   
+            -F "file=@send_make.mp4;filename=${{ github.event.client_payload.content_id || 'video' }}_1080x1920.mp4"

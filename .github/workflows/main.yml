@@ -17,8 +17,8 @@ jobs:
 
       - name: Run Subagents & Render Video 30s
         env:
-          GEMINI_API_KEY: "DAN_MA_GEMINI_VAO_DAY"
-          P1: ${{ github.event.client_payload.p1 }}
+GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+P1: ${{ github.event.client_payload.p1 }}
           P2: ${{ github.event.client_payload.p2 }}
           P3: ${{ github.event.client_payload.p3 }}
           P4: ${{ github.event.client_payload.p4 }}

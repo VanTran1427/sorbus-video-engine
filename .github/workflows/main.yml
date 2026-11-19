@@ -1,5 +1,6 @@
 name: Render 30s Video
 on:
+  workflow_dispatch:
   repository_dispatch:
     types: [render_video]
 
@@ -8,12 +9,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Python & FFmpeg
+
+      - name: Install FFmpeg & Python packages
         run: |
           sudo apt-get update && sudo apt-get install -y ffmpeg
-          pip install edge-tts requests
-      - name: Render Video 30s
+          pip install requests edge-tts
+
+      - name: Run Subagents & Render Video 30s
         env:
+          GEMINI_API_KEY: "DAN_MA_GEMINI_VAO_DAY"
           P1: ${{ github.event.client_payload.p1 }}
           P2: ${{ github.event.client_payload.p2 }}
           P3: ${{ github.event.client_payload.p3 }}
@@ -21,7 +25,9 @@ jobs:
           P5: ${{ github.event.client_payload.p5 }}
           VOICE_TEXT: ${{ github.event.client_payload.voice_text }}
         run: python render.py
+
       - name: Send MP4 back to Make Webhook
+        if: ${{ github.event.client_payload.webhook_url != null }}
         run: |
           curl -X POST "${{ github.event.client_payload.webhook_url }}" \
             -F "content_id=${{ github.event.client_payload.content_id }}" \

@@ -3,21 +3,10 @@ import edge_tts
 
 DEFAULT_SCENES = [
     "pouring olive oil",
-    "fresh avocado",
-    "drinking water sunlight",
-    "morning sunlight nature",
+    "fresh avocado healthy",
+    "drinking water morning",
+    "sunlight nature leaves",
     "healthy breakfast fruit"
-]
-
-# Kho video quay thật HD dự phòng trực tiếp từ CDN Mixkit (Không cần API Key, tải siêu tốc từ máy chủ Mỹ)
-CURATED_WELLNESS_VIDEOS = [
-    "https://assets.mixkit.co/videos/preview/mixkit-pouring-olive-oil-into-a-small-bowl-42929-large.mp4",
-    "https://assets.mixkit.co/videos/preview/mixkit-woman-drinking-water-in-the-morning-42615-large.mp4",
-    "https://assets.mixkit.co/videos/preview/mixkit-fresh-sliced-avocado-on-a-wooden-board-42923-large.mp4",
-    "https://assets.mixkit.co/videos/preview/mixkit-sunlight-filtering-through-green-leaves-4046-large.mp4",
-    "https://assets.mixkit.co/videos/preview/mixkit-pouring-clean-water-into-a-glass-42608-large.mp4",
-    "https://assets.mixkit.co/videos/preview/mixkit-hands-holding-fresh-organic-vegetables-42915-large.mp4",
-    "https://assets.mixkit.co/videos/preview/mixkit-slow-motion-of-water-drops-falling-4053-large.mp4"
 ]
 
 # SUBAGENT 1 & 2: Chuyển kịch bản sang văn nói tự nhiên + Lọc từ khóa tìm Video quay thật
@@ -31,7 +20,7 @@ Bạn là Giám đốc Sáng tạo Video ngắn (TikTok/Reels) cho thương hi�
 Nhiệm vụ 1 (Voice Coach): Viết lại lời bình dưới đây sang VĂN NÓI ĐỜI THƯỜNG của creator chia sẻ mẹo sức khỏe. Câu ngắn gọn, mềm mại, gần gũi, dùng dấu phẩy và dấu ba chấm (...) ở chỗ cần nghỉ lấy hơi tự nhiên. Độ dài 65-75 chữ (đọc vừa khít 28-30 giây). Tuyệt đối không dùng văn viết cứng nhắc, không kèm ghi chú.
 Lời bình gốc: "{raw_voice}"
 
-Nhiệm vụ 2 (Visual Director): Xuất ra đúng 5 cụm từ khóa tiếng Anh ngắn gọn (2-3 từ/cụm, chỉ tả cảnh vật/thực phẩm/ánh sáng thực tế như 'olive oil', 'avocado', 'morning sunlight', 'water droplets', 'healthy breakfast') để tìm video quay thật. Không dùng từ 9:16, 4k, bottle, supplement.
+Nhiệm vụ 2 (Visual Director): Xuất ra đúng 5 cụm từ khóa tiếng Anh cực ngắn (2 từ/cụm, chỉ tả cảnh vật/thực phẩm/ánh sáng thực tế như 'olive oil', 'avocado', 'morning sunlight', 'water drops', 'healthy food') để tìm video quay thật. Không dùng từ 9:16, 4k, bottle, supplement.
 5 cảnh gốc: {json.dumps(raw_prompts, ensure_ascii=False)}
 
 Trả về ĐÚNG JSON nguyên bản:
@@ -92,62 +81,78 @@ def subagent_voice_actor(spoken_text, api_key, out_wav="voice.wav"):
         print("Gemini TTS fallback:", e)
     return False
 
-# SUBAGENT 4: Săn Video quay thật không cần API Key (Mixkit Search + Wikimedia Commons API + Kho CDN dự phòng)
+# Kiểm tra chắc chắn file tải về có luồng hình ảnh video thật sự (không phải file lỗi/rỗng)
+def is_valid_video(filepath):
+    if not os.path.exists(filepath) or os.path.getsize(filepath) < 100000:
+        return False
+    res = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_name,width", "-of", "csv=p=0", filepath],
+        capture_output=True, text=True
+    )
+    return res.returncode == 0 and len(res.stdout.strip()) > 0
+
+# SUBAGENT 4: Săn Video quay thật từ Wikimedia Commons + Internet Archive (Mở 100%, không chặn GitHub IP)
 def subagent_keyless_footage_hunter(query, index, out_path, used_urls):
     headers = {
-        "User-Agent": "SorbusVideoBot/1.0 (https://healthstore.vn; support@healthstore.vn) Mozilla/5.0"
+        "User-Agent": "SorbusWellnessBot/2.0 (https://healthstore.vn; van@sorbus.vn)"
     }
+    backup_queries = [query, "sunlight nature", "water drops", "fresh fruit", "healthy food", "morning coffee"]
 
-    # Tầng 1: Quét trực tiếp CDN video quay thật từ Mixkit theo từ khóa (từ máy chủ GitHub Mỹ)
-    slug = re.sub(r'[^a-z0-9]+', '-', query.lower()).strip('-')
-    try:
-        r = requests.get(f"https://mixkit.co/free-stock-video/{slug}/", headers=headers, timeout=15)
-        if r.status_code == 200:
-            mp4_links = re.findall(r'https://assets\.mixkit\.co/videos/[^\s"\'<>]+?-large\.mp4', r.text)
-            for link in mp4_links:
-                if link not in used_urls:
-                    dl = requests.get(link, headers=headers, timeout=30)
-                    if dl.status_code == 200 and len(dl.content) > 80000:
-                        used_urls.add(link)
-                        with open(out_path, "wb") as f:
-                            f.write(dl.content)
-                        return True
-    except Exception as e:
-        print("Mixkit search skip:", e)
+    # Tầng 1: Quét kho video mở Wikimedia Commons (kèm kiểm tra ffprobe thật)
+    for q in backup_queries:
+        try:
+            enc_q = urllib.parse.quote(f"{q} filetype:video")
+            wiki_url = f"https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch={enc_q}&gsrnamespace=6&gsrlimit=12&prop=imageinfo&iiprop=url|size|mime&format=json"
+            rw = requests.get(wiki_url, headers=headers, timeout=20)
+            if rw.status_code == 200:
+                pages = rw.json().get("query", {}).get("pages", {})
+                for _, pinfo in pages.items():
+                    ii = (pinfo.get("imageinfo") or [{}])[0]
+                    vurl = ii.get("url", "")
+                    vsize = ii.get("size", 0)
+                    vmime = ii.get("mime", "")
+                    if vurl and vurl not in used_urls and ("video" in vmime or vurl.lower().endswith((".webm", ".mp4", ".ogv"))) and 150000 < vsize < 40000000:
+                        dl = requests.get(vurl, headers=headers, timeout=45)
+                        if dl.status_code == 200:
+                            with open(out_path, "wb") as f:
+                                f.write(dl.content)
+                            if is_valid_video(out_path):
+                                used_urls.add(vurl)
+                                print(f"Scene {index} OK (Wikimedia): {vurl}")
+                                return True
+        except Exception as e:
+            print("Wikimedia search skip:", e)
 
-    # Tầng 2: Gọi API mở của Wikimedia Commons (Tài nguyên mở 100%, không cần API Key)
-    try:
-        enc_q = urllib.parse.quote(f"{query} filetype:video")
-        wiki_url = f"https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch={enc_q}&gsrnamespace=6&gsrlimit=8&prop=imageinfo&iiprop=url|size&format=json"
-        rw = requests.get(wiki_url, headers=headers, timeout=20)
-        if rw.status_code == 200:
-            pages = rw.json().get("query", {}).get("pages", {})
-            for _, pinfo in pages.items():
-                ii = (pinfo.get("imageinfo") or [{}])[0]
-                vurl = ii.get("url", "")
-                vsize = ii.get("size", 0)
-                if vurl and vurl not in used_urls and vurl.lower().endswith((".webm", ".mp4")) and 100000 < vsize < 35000000:
-                    dl = requests.get(vurl, headers=headers, timeout=40)
-                    if dl.status_code == 200 and len(dl.content) > 100000:
-                        used_urls.add(vurl)
-                        with open(out_path, "wb") as f:
-                            f.write(dl.content)
-                        return True
-    except Exception as e:
-        print("Wikimedia search skip:", e)
-
-    # Tầng 3: Lấy từ danh sách CDN Wellness quay thật cố định
-    for fallback_url in CURATED_WELLNESS_VIDEOS[index:] + CURATED_WELLNESS_VIDEOS[:index]:
-        if fallback_url not in used_urls:
-            try:
-                dl = requests.get(fallback_url, headers=headers, timeout=30)
-                if dl.status_code == 200 and len(dl.content) > 80000:
-                    used_urls.add(fallback_url)
-                    with open(out_path, "wb") as f:
-                        f.write(dl.content)
-                    return True
-            except Exception:
-                pass
+    # Tầng 2: Quét kho MP4 mở của Internet Archive (archive.org) - Không bao giờ chặn máy chủ Mỹ
+    for q in [query, "nature sunlight", "water slow motion"]:
+        try:
+            ia_q = urllib.parse.quote(f'({q}) AND mediatype:(movies) AND format:(MPEG4)')
+            ia_url = f"https://archive.org/advancedsearch.php?q={ia_q}&fl[]=identifier&rows=8&page=1&output=json"
+            ra = requests.get(ia_url, headers=headers, timeout=20)
+            if ra.status_code == 200:
+                docs = ra.json().get("response", {}).get("docs", [])
+                for doc in docs:
+                    ident = doc.get("identifier")
+                    if not ident:
+                        continue
+                    meta = requests.get(f"https://archive.org/metadata/{ident}", headers=headers, timeout=15).json()
+                    for fobj in meta.get("files", []):
+                        fname = fobj.get("name", "")
+                        fsize = int(fobj.get("size", 0) or 0)
+                        if fname.lower().endswith(".mp4") and 200000 < fsize < 30000000:
+                            dl_url = f"https://archive.org/download/{ident}/{urllib.parse.quote(fname)}"
+                            if dl_url in used_urls:
+                                continue
+                            dl = requests.get(dl_url, headers=headers, timeout=45)
+                            if dl.status_code == 200:
+                                with open(out_path, "wb") as f:
+                                    f.write(dl.content)
+                                if is_valid_video(out_path):
+                                    used_urls.add(dl_url)
+                                    print(f"Scene {index} OK (Archive): {dl_url}")
+                                    return True
+        except Exception as e:
+            print("Archive search skip:", e)
 
     return False
 
@@ -180,32 +185,43 @@ async def main():
         "-map", "[aout]", "-c:a", "aac", "-b:a", "192k", "final_audio.m4a"
     ], check=True)
 
-    # Bước 4: Tải 5 cảnh Video quay thật & hậu kỳ màu ấm + chuyển cảnh mượt
+    # Bước 4: Tải 5 cảnh Video quay thật & chuẩn hóa cùng hệ màu/khung hình 720x1280 HD mượt mà
     used_urls = set()
-    clips = []
+    clip_files = []
     for i, q in enumerate(scene_queries):
-        raw_vid = f"raw_{i}.mp4"
+        raw_vid = f"raw_{i}.video"
         clip_name = f"clip_{i}.mp4"
         if subagent_keyless_footage_hunter(q, i, raw_vid, used_urls):
             subprocess.run([
                 "ffmpeg", "-y", "-stream_loop", "-1", "-i", raw_vid,
-                "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,eq=brightness=0.02:saturation=1.1,fade=t=in:st=0:d=0.35,fade=t=out:st=5.65:d=0.35",
-                "-t", "6", "-an", "-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p", clip_name
+                "-vf", "scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1,fps=30,format=yuv420p,eq=brightness=0.02:saturation=1.12,fade=t=in:st=0:d=0.35,fade=t=out:st=5.65:d=0.35",
+                "-t", "6", "-an", "-c:v", "libx264", "-preset", "fast", "-crf", "23", clip_name
             ], check=True)
         else:
+            # Nếu vẫn thiếu 1 cảnh lẻ, tạo hiệu ứng ánh sáng chuyển động sóng nhẹ thay vì màu chết đứng im
             subprocess.run([
-                "ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=#C5A059:s=1080x1920:d=6:r=30",
-                "-c:v", "libx264", "-pix_fmt", "yuv420p", clip_name
+                "ffmpeg", "-y", "-f", "lavfi",
+                "-i", "gradients=s=720x1280:c0=#1e130c:c1=#c5a059:duration=6:speed=0.05:r=30",
+                "-vf", "setsar=1,format=yuv420p,fade=t=in:st=0:d=0.35,fade=t=out:st=5.65:d=0.35",
+                "-t", "6", "-c:v", "libx264", "-preset", "fast", clip_name
             ], check=True)
-        clips.append(f"file '{clip_name}'\n")
+        clip_files.append(clip_name)
 
-    with open("list.txt", "w") as f:
-        f.writelines(clips)
+    # Bước 5: Nối 5 luồng hình bằng filter_complex (KHÔNG dùng -c:v copy để tránh mất hình trên Windows/Drive)
+    inputs_cmd = []
+    for cf in clip_files:
+        inputs_cmd.extend(["-i", cf])
+    concat_filter = "".join([f"[{idx}:v:0]" for idx in range(len(clip_files))]) + f"concat=n={len(clip_files)}:v=1:a=0[outv]"
 
-    # Bước 5: Ghép xuất MP4 hoàn chỉnh
     subprocess.run([
-        "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "list.txt",
-        "-i", "final_audio.m4a", "-c:v", "copy", "-c:a", "copy", "-shortest", "final_30s.mp4"
+        "ffmpeg", "-y",
+        *inputs_cmd,
+        "-i", "final_audio.m4a",
+        "-filter_complex", concat_filter,
+        "-map", "[outv]", "-map", f"{len(clip_files)}:a:0",
+        "-c:v", "libx264", "-profile:v", "main", "-pix_fmt", "yuv420p", "-crf", "24",
+        "-c:a", "aac", "-b:a", "128k",
+        "-movflags", "+faststart", "-shortest", "final_30s.mp4"
     ], check=True)
 
 if __name__ == "__main__":
